@@ -1,0 +1,29 @@
+name: fork-muse-checks
+
+on:
+  push:
+    branches:
+      - fix/muse-streaming-tool-arguments
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    if: github.repository == 'trukhinyuri/CLIProxyAPI'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test Muse response conversion
+        run: go test -race ./internal/translator/codex/openai/responses
+      - name: Build server
+        run: go build -o bin/cli-proxy-api ./cmd/server
