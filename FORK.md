@@ -23,6 +23,14 @@ models whose upstream name starts with `muse-spark-`; other models pass through.
 Aliases should map to a Muse upstream name. Both raw JSON events and SSE `data:`
 events use the same conversion path.
 
+Number normalization uses decimal strings instead of arbitrary-precision
+arithmetic. Exponent magnitude and generated digit count are limited to 4,096;
+larger numbers retain their original representation. A shared 64 KiB growth
+budget applies to each completed argument string. If normalization would exceed
+that budget, the entire original argument string is preserved. Limits are checked
+before adding zeroes, preventing compact scientific notation from amplifying
+memory use without bound.
+
 The code change is confined to three files under
 `internal/translator/codex/openai/responses/`: the response converter,
 `muse_arguments.go`, and its tests. This branch does not contain runtime account
@@ -44,6 +52,8 @@ server on Linux and macOS for each push to the maintained branch. These checks
 need no provider credentials. Tests cover accumulated deltas, missing final
 arguments, interleaved calls, explicit final values, state cleanup, number
 precision, invalid payloads, and non-Muse responses.
+Large positive and negative exponents and cumulative number expansion have
+regression tests as well.
 
 ## Known limits
 
@@ -74,7 +84,7 @@ branch without force. Update the fork's `main` only by a fast-forward after
 checking for fork-specific commits. Keep credentials and generated binaries out
 of commits.
 
-The implementation and regression tests are kept in a separate commit from this
+The implementation and regression tests are kept in separate commits from this
 fork guide and its CI workflow. After live compatibility is established, that
-commit can form a focused upstream contribution with the observed event sequence
+patch series can form a focused upstream contribution with the observed event sequence
 and test evidence. No upstream pull request is opened by this setup.
