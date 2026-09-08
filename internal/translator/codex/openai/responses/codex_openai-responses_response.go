@@ -12,16 +12,17 @@ import (
 // ConvertCodexResponseToOpenAIResponses converts OpenAI Chat Completions streaming chunks
 // to OpenAI Responses SSE events (response.*).
 
-func ConvertCodexResponseToOpenAIResponses(_ context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, _ *any) [][]byte {
+func ConvertCodexResponseToOpenAIResponses(_ context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	if bytes.HasPrefix(rawJSON, []byte("data:")) {
 		rawJSON = bytes.TrimSpace(rawJSON[5:])
+		rawJSON = restoreMuseArguments(rawJSON, modelName, param)
 		rawJSON = setResponsesModel(rawJSON, modelName, originalRequestRawJSON, requestRawJSON)
 		out := make([]byte, 0, len(rawJSON)+len("data: "))
 		out = append(out, []byte("data: ")...)
 		out = append(out, rawJSON...)
 		return [][]byte{out}
 	}
-	return [][]byte{setResponsesModel(rawJSON, modelName, originalRequestRawJSON, requestRawJSON)}
+	return [][]byte{setResponsesModel(restoreMuseArguments(rawJSON, modelName, param), modelName, originalRequestRawJSON, requestRawJSON)}
 }
 
 func setResponsesModel(rawJSON []byte, modelName string, originalRequestRawJSON, requestRawJSON []byte) []byte {
