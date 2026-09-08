@@ -3,6 +3,7 @@ package responses
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/tidwall/gjson"
@@ -26,6 +27,7 @@ func TestMuseCompletedArguments(t *testing.T) {
 		{`{"timeout_ms":120000.0}`, `{"timeout_ms":120000}`},
 		{``, `{}`},
 		{`{"a":[1e3,1.5,"12.0",9007199254740993.0]}`, `{"a":[1000,1.5,"12.0",9007199254740993]}`},
+		{`{"a":[10e-1,1.230e2,1.230e1,-12.0,-0.0,1000e-4]}`, `{"a":[1,123,1.230e1,-12,0,1000e-4]}`},
 	} {
 		p, _ := sjson.Set(`{"type":"response.output_item.done","item":{"type":"function_call"}}`, "item.arguments", tc.in)
 		got := normalizeMuseToolArguments([]byte(p), "muse-spark-1.3")
@@ -35,6 +37,39 @@ func TestMuseCompletedArguments(t *testing.T) {
 		if string(normalizeMuseToolArguments([]byte(p), "gpt-6-astra")) != p {
 			t.Fatal("modified non-Muse response")
 		}
+	}
+}
+
+func TestMuseArgumentsBoundNumericExpansion(t *testing.T) {
+	for _, raw := range []string{
+		`{"n":1e100000}`,
+		`{"n":1e-100000}`,
+		`{"n":1e999999999999999999999}`,
+		`{"n":1e-999999999999999999999}`,
+		`{"n":` + strings.Repeat("9", maxMuseNumberDigits+1) + `.0}`,
+	} {
+		p, err := sjson.Set(`{"type":"response.function_call_arguments.done"}`, "arguments", raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := normalizeMuseToolArguments([]byte(p), "muse-spark-1.3")
+		if gjson.GetBytes(got, "arguments").String() != raw {
+			t.Fatalf("expanded oversized number (input length %d, output length %d)", len(raw), len(got))
+		}
+	}
+}
+
+func TestMuseArgumentsBoundCumulativeExpansion(t *testing.T) {
+	// Each individual number is below the limit, but their combined expansion
+	// exceeds the argument budget. Preserve the original string in full.
+	raw := `{"timeout_ms":120000.0,"values":[` + strings.Repeat("1e1000,", 79) + `1e1000]}`
+	p, err := sjson.Set(`{"type":"response.output_item.done","item":{"type":"function_call"}}`, "item.arguments", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := normalizeMuseToolArguments([]byte(p), "muse-spark-1.3")
+	if string(got) != p {
+		t.Fatalf("did not preserve original arguments when expansion budget was exceeded (output length %d)", len(got))
 	}
 }
 
