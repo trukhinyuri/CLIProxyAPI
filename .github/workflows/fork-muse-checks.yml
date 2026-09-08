@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test-and-build:
-    if: github.repository == 'trukhinyuri/CLIProxyAPI'
+    if: github.repository == 'trukhinyuri/vibeflow'
     strategy:
       fail-fast: false
       matrix:

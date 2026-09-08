@@ -1,7 +1,7 @@
-# Muse streaming tool arguments
+# vibeflow: Muse streaming tool arguments
 
 This branch maintains a small compatibility patch for Muse Spark responses consumed
-by Codex. The fork is [trukhinyuri/CLIProxyAPI](https://github.com/trukhinyuri/CLIProxyAPI);
+by Codex. The fork is [trukhinyuri/vibeflow](https://github.com/trukhinyuri/vibeflow);
 the upstream project is [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
 
 ## Base and scope
@@ -37,6 +37,15 @@ The code change is confined to three files under
 files or credentials. Provider configuration and authorization remain local.
 
 ## Build and verify
+
+The canonical checkout on this computer is `~/Personal/Sources/vibeflow`.
+To create the same checkout on another computer:
+
+```sh
+git clone --branch fix/muse-streaming-tool-arguments https://github.com/trukhinyuri/vibeflow.git ~/Personal/Sources/vibeflow
+cd ~/Personal/Sources/vibeflow
+git remote add upstream https://github.com/router-for-me/CLIProxyAPI.git
+```
 
 Use the Go version required by `go.mod` or a newer supported version, then run:
 
