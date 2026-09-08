@@ -9,7 +9,7 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-type museArgumentsState struct{ values map[string]string }
+type museArgumentsState struct{ values map[string]*strings.Builder }
 
 const (
 	maxMuseNumberDigits       = 4096
@@ -29,25 +29,33 @@ func restoreMuseArguments(payload []byte, model string, param *any) []byte {
 	}
 	state, ok := (*param).(*museArgumentsState)
 	if !ok {
-		state = &museArgumentsState{values: map[string]string{}}
+		state = &museArgumentsState{values: map[string]*strings.Builder{}}
 		*param = state
 	}
 	kind := gjson.GetBytes(payload, "type").String()
 	id := gjson.GetBytes(payload, "item_id").String()
+	value := state.values[id]
 	switch kind {
 	case "response.function_call_arguments.delta":
-		state.values[id] += gjson.GetBytes(payload, "delta").String()
+		if value == nil {
+			value = &strings.Builder{}
+			state.values[id] = value
+		}
+		value.WriteString(gjson.GetBytes(payload, "delta").String())
 	case "response.function_call_arguments.done":
-		if gjson.GetBytes(payload, "arguments").String() == "" && state.values[id] != "" {
-			payload, _ = sjson.SetBytes(payload, "arguments", state.values[id])
+		if gjson.GetBytes(payload, "arguments").String() == "" && value != nil && value.Len() > 0 {
+			payload, _ = sjson.SetBytes(payload, "arguments", value.String())
 		}
 		payload = normalizeMuseToolArguments(payload, model)
-		state.values[id] = gjson.GetBytes(payload, "arguments").String()
+		completed := &strings.Builder{}
+		completed.WriteString(gjson.GetBytes(payload, "arguments").String())
+		state.values[id] = completed
 	case "response.output_item.done":
 		if gjson.GetBytes(payload, "item.type").String() == "function_call" {
 			id = gjson.GetBytes(payload, "item.id").String()
-			if gjson.GetBytes(payload, "item.arguments").String() == "" && state.values[id] != "" {
-				payload, _ = sjson.SetBytes(payload, "item.arguments", state.values[id])
+			value = state.values[id]
+			if gjson.GetBytes(payload, "item.arguments").String() == "" && value != nil && value.Len() > 0 {
+				payload, _ = sjson.SetBytes(payload, "item.arguments", value.String())
 			}
 			payload = normalizeMuseToolArguments(payload, model)
 			delete(state.values, id)

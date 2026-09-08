@@ -140,3 +140,32 @@ func TestMuseArgumentsPreserveUnsupportedPayloads(t *testing.T) {
 		t.Fatal("modified non-Muse response or stream state")
 	}
 }
+
+func BenchmarkMuseFragmentedArguments(b *testing.B) {
+	raw := `{"message":"` + strings.Repeat("x", 256*1024) + `"}`
+	var events [][]byte
+	for offset := 0; offset < len(raw); offset += 16 {
+		end := min(offset+16, len(raw))
+		event, err := sjson.SetBytes([]byte(`{"type":"response.function_call_arguments.delta","item_id":"fc1"}`), "delta", raw[offset:end])
+		if err != nil {
+			b.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	done := []byte(`{"type":"response.function_call_arguments.done","item_id":"fc1","arguments":""}`)
+	final := []byte(`{"type":"response.output_item.done","item":{"id":"fc1","type":"function_call","arguments":""}}`)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(raw)))
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		var state any
+		for _, event := range events {
+			restoreMuseArguments(event, "muse-spark-1.3", &state)
+		}
+		restoreMuseArguments(done, "muse-spark-1.3", &state)
+		got := restoreMuseArguments(final, "muse-spark-1.3", &state)
+		if gjson.GetBytes(got, "item.arguments").String() != raw {
+			b.Fatal("lost fragmented arguments")
+		}
+	}
+}
