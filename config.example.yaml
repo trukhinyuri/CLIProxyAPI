@@ -206,6 +206,13 @@ video-result-auth-cache-ttl: "3h"
 # When > 0, overrides the default worker count (16).
 # auth-auto-refresh-workers: 16
 
+# How often (seconds) credentials held in a quota cooldown are probed upstream so the
+# cooldown is lifted as soon as the provider reports the limit as available again
+# (for example after a purchased limit reset or an earlier-than-parsed reset).
+# Currently supported for ChatGPT OAuth (Codex) credentials via the account usage endpoint.
+# 0 keeps the default (300); set a negative value to disable the probe.
+# quota-recovery-interval-seconds: 300
+
 # Quota exceeded behavior
 quota-exceeded:
   switch-project: true # Whether to automatically switch to another project when a quota is exceeded

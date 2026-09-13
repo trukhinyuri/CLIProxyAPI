@@ -76,6 +76,13 @@ type Config struct {
 	// When <= 0, the default worker count is used.
 	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
 
+	// QuotaRecoveryIntervalSeconds controls how often credentials held in a quota
+	// cooldown are probed upstream so the cooldown can be lifted as soon as the
+	// upstream reports the limit as available again (for example after a purchased
+	// limit reset). 0 keeps the default (300 seconds); negative values disable the
+	// probe and cooldowns then only expire on their parsed reset time.
+	QuotaRecoveryIntervalSeconds int `yaml:"quota-recovery-interval-seconds" json:"quota-recovery-interval-seconds"`
+
 	// RequestRetry defines the number of additional credential retry rounds after
 	// the first round has exhausted its eligible credentials.
 	RequestRetry int `yaml:"request-retry" json:"request-retry"`

@@ -91,6 +91,16 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(ctx, interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
+		if s.cfg.QuotaRecoveryIntervalSeconds >= 0 {
+			quotaInterval := time.Duration(s.cfg.QuotaRecoveryIntervalSeconds) * time.Second
+			s.coreManager.StartQuotaRecovery(ctx, quotaInterval)
+			if quotaInterval <= 0 {
+				quotaInterval = 5 * time.Minute
+			}
+			log.Infof("quota recovery probe started (interval=%s)", quotaInterval)
+		} else {
+			log.Infof("quota recovery probe disabled by configuration")
+		}
 	}
 
 	if !homeEnabled {
@@ -286,6 +296,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 			s.watcherCancel()
 		}
 		if s.coreManager != nil {
+			s.coreManager.StopQuotaRecovery()
 			s.coreManager.StopAutoRefresh()
 		}
 		if s.watcher != nil {

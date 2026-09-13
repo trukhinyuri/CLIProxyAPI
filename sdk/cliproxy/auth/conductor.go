@@ -184,6 +184,12 @@ type Manager struct {
 	refreshCancel context.CancelFunc
 	refreshLoop   *authAutoRefreshLoop
 
+	// Quota recovery loop state (see quota_recovery.go).
+	quotaRecoveryCancel context.CancelFunc
+	// quotaRecoveryPassHook is invoked after every recovery pass; tests use it
+	// to observe loop progress without sleeping.
+	quotaRecoveryPassHook func(recovered []string)
+
 	requestPrepareLocks sync.Map
 	// refreshLocks serializes credential refresh per auth ID so concurrent
 	// 401 recoveries and auto-refresh workers do not race the same refresh_token.
