@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/muse-streaming-tool-arguments
+      - feat/codex-quota-recovery
   workflow_dispatch:
 
 permissions:
@@ -25,5 +26,7 @@ jobs:
           cache: true
       - name: Test Muse response conversion
         run: go test -race ./internal/translator/codex/openai/responses
+      - name: Test quota recovery probe
+        run: go test -race ./sdk/cliproxy/auth -run QuotaRecovery && go test -race ./internal/runtime/executor ./internal/runtime/executor/helps -run 'CodexUsageProbe|ProbeQuota'
       - name: Build server
         run: go build -o bin/cli-proxy-api ./cmd/server

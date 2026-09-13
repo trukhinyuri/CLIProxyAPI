@@ -64,6 +64,33 @@ precision, invalid payloads, and non-Muse responses.
 Large positive and negative exponents and cumulative number expansion have
 regression tests as well.
 
+## Quota recovery probe
+
+The second fork patch, `feat/codex-quota-recovery`, lifts a stale quota cooldown
+without a restart. Upstream parks a ChatGPT OAuth credential until the
+`resets_at` value parsed from the last `usage_limit_reached` error and never
+re-checks the provider, so a purchased limit reset (or an upstream reset that
+lands earlier than parsed) leaves the credential unusable for days.
+
+The patch adds an optional `QuotaProber` executor interface in
+`sdk/cliproxy/auth` (`quota_recovery.go`) and a manager loop that probes every
+credential held in a quota cooldown at `quota-recovery-interval-seconds`
+(default 300, negative disables, floor 30). The Codex executor implements the
+probe against the same account usage endpoint the official client polls
+(`/backend-api/wham/usage`, parser in `helps/codex_usage_probe.go`). When the
+provider reports the limit as no longer reached, the cooldown is cleared like a
+successful request; models the endpoint marks unavailable keep their own
+cooldown. When the provider still reports a limit with an earlier reset, the
+cooldown deadline is shortened, never extended. API-key credentials and custom
+upstreams without the ChatGPT backend layout are skipped.
+
+Verification:
+
+```sh
+go test ./sdk/cliproxy/auth -run QuotaRecovery
+go test ./internal/runtime/executor ./internal/runtime/executor/helps -run 'CodexUsageProbe|ProbeQuota'
+```
+
 ## Known limits
 
 This patch restores arguments only when the stream actually contains them. It
