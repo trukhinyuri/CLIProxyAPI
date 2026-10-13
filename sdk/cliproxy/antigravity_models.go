@@ -234,6 +234,8 @@ func buildPersistedAntigravityCapabilityHintsValue(project, endpoint string, hin
 	}
 	value := map[string]any{
 		"model_ids": modelItems,
+		// updated_at tells operators how fresh a persisted entitlement list is; parsers ignore it.
+		"updated_at": antigravityNowFunc().UTC().Format(time.RFC3339),
 	}
 	if project = strings.TrimSpace(project); project != "" {
 		value["project_id"] = project
@@ -599,6 +601,34 @@ func normalizeAntigravityFetchedModelID(modelID string) string {
 	return strings.ToLower(strings.TrimSpace(modelID))
 }
 
+// diffModelIDs reports sorted ids present only in next (added) and only in previous (removed).
+func diffModelIDs(previous, next []*ModelInfo) (added, removed []string) {
+	before := make(map[string]struct{}, len(previous))
+	for _, model := range previous {
+		if model != nil {
+			before[model.ID] = struct{}{}
+		}
+	}
+	after := make(map[string]struct{}, len(next))
+	for _, model := range next {
+		if model == nil {
+			continue
+		}
+		after[model.ID] = struct{}{}
+		if _, ok := before[model.ID]; !ok {
+			added = append(added, model.ID)
+		}
+	}
+	for id := range before {
+		if _, ok := after[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	slices.Sort(added)
+	slices.Sort(removed)
+	return added, removed
+}
+
 // WaitAntigravityProbes waits for any in-flight asynchronous Antigravity capability probes to complete.
 func (s *Service) WaitAntigravityProbes() {
 	if s == nil {
@@ -713,12 +743,16 @@ func (s *Service) applyAntigravityModelHints(ctx context.Context, auth *coreauth
 			return
 		}
 		reg := registry.GetGlobalRegistry()
+		previous := reg.GetModelsForClient(auth.ID)
 		var appliedEpoch uint64
 		appliedEpoch, updated = reg.ReplaceClientModels(auth.ID, providerKey, expectedRegEpoch, models)
 		if updated {
 			entry.appliedRevision = hints.revision
 			entry.appliedEpoch = appliedEpoch
 			antigravityCapabilityCache[expectedKey] = entry
+			if added, removed := diffModelIDs(previous, models); len(previous) > 0 && (len(added) > 0 || len(removed) > 0) {
+				log.Infof("antigravity: account model list changed for %s: added %v, removed %v", auth.ID, added, removed)
+			}
 		}
 		antigravityCapabilityMu.Unlock()
 		s.cfgMu.RUnlock()
