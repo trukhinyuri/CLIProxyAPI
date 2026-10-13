@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,18 +23,25 @@ const embeddedCatalogSource = "embed"
 type catalogUpdater struct {
 	mu         sync.Mutex
 	source     string
+	overlay    string
 	generation uint64
 	cancel     context.CancelFunc
 	ctx        context.Context
 	parentDone <-chan struct{}
 	fetch      func(context.Context, string) ([]byte, error)
+	merge      func(ctx context.Context, base []byte, overlay string) ([]byte, error)
 	publish    func([]byte) ([]string, error)
 }
 
 func (u *catalogUpdater) configure(ctx context.Context, source string) {
+	u.configureWithOverlay(ctx, source, "")
+}
+
+// configureWithOverlay restarts the reader when either the base source or the overlay changes.
+func (u *catalogUpdater) configureWithOverlay(ctx context.Context, source, overlay string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.cancel != nil && u.source == source && u.parentDone == ctx.Done() && u.ctx.Err() == nil {
+	if u.cancel != nil && u.source == source && u.overlay == overlay && u.parentDone == ctx.Done() && u.ctx.Err() == nil {
 		return
 	}
 	if u.cancel != nil {
@@ -41,6 +49,7 @@ func (u *catalogUpdater) configure(ctx context.Context, source string) {
 	}
 	u.generation++
 	u.source = source
+	u.overlay = overlay
 	refreshCtx, cancel := context.WithCancel(ctx)
 	u.cancel = cancel
 	u.ctx = refreshCtx
@@ -69,6 +78,14 @@ func (u *catalogUpdater) configure(ctx context.Context, source string) {
 
 func (u *catalogUpdater) refresh(ctx context.Context, source string, generation uint64) {
 	data, errFetch := u.fetch(ctx, source)
+	if errFetch == nil && u.merge != nil {
+		u.mu.Lock()
+		overlay, current := u.overlay, generation == u.generation
+		u.mu.Unlock()
+		if current && overlay != "" {
+			data, errFetch = u.merge(ctx, data, overlay)
+		}
+	}
 	if errFetch != nil {
 		if ctx.Err() == nil {
 			log.Warn("model catalog refresh failed; keeping last valid catalog")
@@ -86,7 +103,66 @@ func (u *catalogUpdater) refresh(ctx context.Context, source string, generation 
 		log.Warn("model catalog rejected; keeping last valid catalog")
 		return
 	}
+	if len(changed) > 0 {
+		log.Infof("model catalog updated; changed providers: %v", changed)
+	}
 	notifyModelRefresh(changed)
+}
+
+// mergeCatalogOverlay appends overlay entries whose id is missing from the same base section.
+// Base (official or configured) entries always win; unknown fields are preserved verbatim.
+func mergeCatalogOverlay(ctx context.Context, base []byte, overlay string) ([]byte, error) {
+	extra, errRead := readCatalogSource(ctx, overlay)
+	if errRead != nil {
+		return nil, fmt.Errorf("catalog overlay: %w", errRead)
+	}
+	var baseDoc map[string]json.RawMessage
+	if errUnmarshal := json.Unmarshal(base, &baseDoc); errUnmarshal != nil {
+		return nil, errUnmarshal
+	}
+	var extraDoc map[string][]json.RawMessage
+	if errUnmarshal := json.Unmarshal(extra, &extraDoc); errUnmarshal != nil {
+		return nil, fmt.Errorf("catalog overlay: %w", errUnmarshal)
+	}
+	for section, entries := range extraDoc {
+		var rows []json.RawMessage
+		if raw, ok := baseDoc[section]; ok && len(raw) > 0 && string(raw) != "null" {
+			if errUnmarshal := json.Unmarshal(raw, &rows); errUnmarshal != nil {
+				return nil, fmt.Errorf("catalog section %s: %w", section, errUnmarshal)
+			}
+		}
+		have := make(map[string]struct{}, len(rows)+len(entries))
+		for _, row := range rows {
+			have[catalogEntryID(row)] = struct{}{}
+		}
+		for _, entry := range entries {
+			id := catalogEntryID(entry)
+			if id == "" {
+				return nil, fmt.Errorf("catalog overlay: %s entry without id", section)
+			}
+			if _, exists := have[id]; exists {
+				continue
+			}
+			rows = append(rows, entry)
+			have[id] = struct{}{}
+		}
+		merged, errMarshal := json.Marshal(rows)
+		if errMarshal != nil {
+			return nil, errMarshal
+		}
+		baseDoc[section] = merged
+	}
+	return json.Marshal(baseDoc)
+}
+
+func catalogEntryID(raw json.RawMessage) string {
+	var entry struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &entry) != nil {
+		return ""
+	}
+	return strings.TrimSpace(entry.ID)
 }
 
 func readCatalogSource(ctx context.Context, source string) ([]byte, error) {
@@ -180,6 +256,7 @@ func publishCatalogBytes(data []byte) ([]string, error) {
 
 var generalCatalogUpdater = &catalogUpdater{
 	fetch:   catalogFetcher(embeddedModelsJSON, modelsURLs, validateCatalogBytes),
+	merge:   mergeCatalogOverlay,
 	publish: publishCatalogBytes,
 }
 var codexCatalogUpdater = &catalogUpdater{
@@ -238,7 +315,7 @@ func configureCatalogs(ctx context.Context, sources CatalogSources, local, home 
 		return
 	}
 	sources = effectiveCatalogSources(sources, local, home)
-	generalCatalogUpdater.configure(ctx, sources.Catalog)
+	generalCatalogUpdater.configureWithOverlay(ctx, sources.Catalog, sources.CatalogOverlay)
 	codexCatalogUpdater.configure(ctx, sources.CodexCatalog)
 	devinCatalogUpdater.configure(ctx, sources.DevinCatalog)
 }
@@ -256,7 +333,7 @@ func effectiveCatalogSources(sources CatalogSources, local, home bool) CatalogSo
 		general = "disabled"
 		devin = "disabled"
 	}
-	return CatalogSources{Catalog: general, CodexCatalog: selectSource(sources.CodexCatalog), DevinCatalog: devin}
+	return CatalogSources{Catalog: general, CatalogOverlay: sources.CatalogOverlay, CodexCatalog: selectSource(sources.CodexCatalog), DevinCatalog: devin}
 }
 
 func validateDevinCatalogBytes(data []byte) error {
