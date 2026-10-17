@@ -1,0 +1,62 @@
+# Daily fast-forward of mirror branches from the upstream (parent) repository.
+# Lives on the control branch `upstream-sync` (this fork's GitHub default branch,
+# because scheduled workflows only run from the default branch). The mirror
+# branches themselves (upstream's default branch, e.g. `main`) never receive
+# fork-only commits: if they have any, the sync refuses instead of merging.
+name: Sync upstream mirror
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: "Space-separated mirror branches (default: upstream default branch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fast-forward mirror branches from upstream
+        env:
+          # GITHUB_TOKEN cannot push upstream commits that touch .github/workflows.
+          # For those, add a repository secret UPSTREAM_SYNC_TOKEN: a PAT with the
+          # `workflow` scope (classic) or Contents+Workflows write (fine-grained).
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+          REPO: ${{ github.repository }}
+          BRANCHES: ${{ inputs.branches || vars.MIRROR_BRANCHES || '' }}
+        run: |
+          set -euo pipefail
+          parent=$(gh api "repos/$REPO" --jq '.parent.full_name // empty')
+          if [ -z "$parent" ]; then echo "::error::$REPO is not a fork"; exit 1; fi
+          if [ -z "$BRANCHES" ]; then BRANCHES=$(gh api "repos/$parent" --jq .default_branch); fi
+          owner=${REPO%%/*}
+          rc=0
+          for b in $BRANCHES; do
+            ahead=$(gh api "repos/$parent/compare/$b...$owner:$b" --jq .ahead_by)
+            if [ "$ahead" != "0" ]; then
+              echo "::error::$REPO:$b has $ahead commit(s) that are not in $parent:$b. The mirror is not clean; move them to a feature branch and reset $b. Refusing to merge."
+              rc=1
+              continue
+            fi
+            if out=$(gh api -X POST "repos/$REPO/merge-upstream" -f branch="$b" 2>&1); then
+              echo "$b: $out"
+            else
+              echo "::error::merge-upstream failed for $b: $out"
+              case "$out" in
+                *workflow*) echo "::error::Upstream changed .github/workflows. GITHUB_TOKEN may not push workflow files; add repository secret UPSTREAM_SYNC_TOKEN (PAT with workflow scope).";;
+              esac
+              rc=1
+            fi
+          done
+          exit $rc
